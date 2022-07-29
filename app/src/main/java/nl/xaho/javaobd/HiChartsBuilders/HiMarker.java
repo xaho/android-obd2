@@ -7,4 +7,9 @@ public class HiMarker extends HighChartsBuilder<HIMarker> {
         object.setEnabled(enabled);
         return this;
     }
+
+    public HiMarker setRadius(Number radius) {
+        object.setRadius(radius);
+        return this;
+    }
 }

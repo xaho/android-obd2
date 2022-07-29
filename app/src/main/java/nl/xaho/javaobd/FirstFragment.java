@@ -5,7 +5,6 @@ import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
-import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -38,13 +37,13 @@ import com.github.pires.obd.commands.protocol.LineFeedOffCommand;
 import com.github.pires.obd.commands.protocol.SelectProtocolCommand;
 import com.github.pires.obd.commands.protocol.TimeoutCommand;
 import com.github.pires.obd.enums.ObdProtocols;
-import com.highsoft.highcharts.common.hichartsclasses.HIData;
-import com.highsoft.highcharts.common.hichartsclasses.HIOptions;
 import com.highsoft.highcharts.common.hichartsclasses.HISeries;
 import com.highsoft.highcharts.common.hichartsclasses.HIXAxis;
 import com.highsoft.highcharts.core.HIChartView;
 
+import nl.xaho.javaobd.HiChartsBuilders.HiData;
 import nl.xaho.javaobd.HiChartsBuilders.HiMarker;
+import nl.xaho.javaobd.HiChartsBuilders.HiOptions;
 import nl.xaho.javaobd.HiChartsBuilders.HiPlotOptions;
 import nl.xaho.javaobd.HiChartsBuilders.HiSpline;
 import nl.xaho.javaobd.HiChartsBuilders.HiTitle;
@@ -80,33 +79,36 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
         HIChartView chartView = view.findViewById(R.id.hc);
         chartView.plugins = new ArrayList<>(Arrays.asList("series-label"));
 
-        HIOptions options = new HIOptions();
-
-        options.setTitle(new HiTitle().setText("OBD2 data").build());
-
-        HIXAxis dateAxis = createDatetimeAxis();
-        options.setXAxis(new ArrayList<HIXAxis>() {{
-            add(dateAxis);
-        }});
-
-        options.setYAxis(new ArrayList<>(Arrays.asList(
-                new HiYAxis().setTitle("Voltage").setMin(0).build(),
-                new HiYAxis().setTitle("RPM").setMin(0).setOpposite(true).build()
-        )));
-
         // https://api.highcharts.com/class-reference/Highcharts.Time#dateFormat
-        options.setTooltip(
-                new HiTooltip().setHeaderFormat("<b>{series.name}</b><br>").setPointFormat("{point.x:%H:%M:%S}: {point.y:.2f}").build());
-        options.setPlotOptions(
-                new HiPlotOptions().setSpline(new HiSpline().setMarker(new HiMarker().setEnabled(true).build()).build()).build());
-        options.setSeries(new ArrayList<>(Arrays.asList(
-                new HiSpline().setName("Module voltage").build(),
-                new HiSpline().setName("Engine RPM").setYAxis(1).build()
-        )));
+        chartView.setOptions(
+                new HiOptions()
+                        .setTitle(new HiTitle().setText("OBD2 data").build())
+                        .setXAxis(new ArrayList<>(Arrays.asList(createDatetimeAxis())))
+                        .setYAxis(new ArrayList<>(Arrays.asList(
+                                new HiYAxis().setTitle("Voltage").setMin(0).build(),
+                                new HiYAxis().setTitle("RPM").setMin(0).setOpposite(true).build()
+                        )))
+                        .setPlotOptions(
+                                new HiPlotOptions().setSpline(
+                                        new HiSpline().setMarker(
+                                                new HiMarker().setEnabled(true).setRadius(2).build()).build()).build())
+                        .setTooltip(new HiTooltip().setHeaderFormat("<b>{series.name}</b><br>").setPointFormat("{point.x:%H:%M:%S}: {point.y:.2f}").build())
+                        .setSeries(new ArrayList<>(Arrays.asList(
+                                new HiSpline().setName("Module voltage").build(),
+                                new HiSpline().setName("Engine RPM").setYAxis(1).build()
+                        ))).build());
 
-        chartView.setOptions(options);
+        binding.buttonFirst.setOnClickListener(x -> selectBluetoothDevice());
+        binding.buttonFirst.setOnLongClickListener(x -> emulateConnection());
+    }
 
-        binding.buttonFirst.setOnClickListener(view1 -> selectBluetoothDevice());
+    private boolean emulateConnection() {
+        handler.postDelayed(pollOdbRunnable = () -> {
+            getSeriesWithName("Module voltage").addPoint(new HiData().setX(System.currentTimeMillis()).setY(Math.random()*100).build());
+            getSeriesWithName("Engine RPM").addPoint(new HiData().setX(System.currentTimeMillis()).setY(Math.random()*100).build());
+            handler.postDelayed(pollOdbRunnable, 1000);
+        }, 1000);
+        return true; //consume event
     }
 
     @NonNull
@@ -233,17 +235,11 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
         try {
             ModuleVoltageCommand mvc = new ModuleVoltageCommand();
             mvc.run(in, out);
-            HIData data = new HIData();
-            data.setX(System.currentTimeMillis());
-            data.setY(mvc.getVoltage());
-            getSeriesWithName("Module voltage").addPoint(data);
+            getSeriesWithName("Module voltage").addPoint(new HiData().setX(System.currentTimeMillis()).setY(mvc.getVoltage()).build());
 
             RPMCommand rpmCommand = new RPMCommand();
             rpmCommand.run(in, out);
-            HIData rpmData = new HIData();
-            rpmData.setX(System.currentTimeMillis());
-            rpmData.setY(rpmCommand.getRPM());
-            getSeriesWithName("Engine RPM").addPoint(rpmData);
+            getSeriesWithName("Engine RPM").addPoint(new HiData().setX(System.currentTimeMillis()).setY(rpmCommand.getRPM()).build());
 
             GearCommand gearCommand = new GearCommand();
             gearCommand.run(in, out);
