@@ -12,4 +12,9 @@ public class HiTooltip extends HighChartsBuilder<HITooltip> {
         object.setPointFormat(format);
         return this;
     }
+
+    public HiTooltip setValueSuffix(String suffix) {
+        object.setValueSuffix(suffix);
+        return this;
+    }
 }
