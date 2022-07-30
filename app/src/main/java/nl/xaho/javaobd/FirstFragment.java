@@ -1,10 +1,15 @@
 package nl.xaho.javaobd;
 
+import static android.app.Activity.RESULT_OK;
+import static androidx.core.content.ContextCompat.getSystemService;
+
 import android.Manifest;
 import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothSocket;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -15,6 +20,7 @@ import android.view.View;
 import android.view.ViewGroup;
 //import android.webkit.WebView;
 import android.widget.ArrayAdapter;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
@@ -192,11 +198,12 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
 
     final int REQUEST_ENABLE_BT = 0;
     @RequiresApi(api = Build.VERSION_CODES.S)
-    protected void onActivityResult(int requestCode, int resultCode) {
+    public void onActivityResult(int requestCode, int resultCode, Intent intent) {
         if (requestCode == REQUEST_ENABLE_BT) {
-            if (resultCode == RESULT_OK) {
+            if (resultCode == RESULT_OK)
                 selectBluetoothDevice();
-            }
+            else
+                Toast.makeText(this.requireContext(), "Cannot connect if Bluetooth is not enabled.", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -205,15 +212,13 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
         // TODO: turn BT on if off
         BluetoothManager bluetoothManager = getSystemService(this.requireContext(), BluetoothManager.class);
         BluetoothAdapter bluetoothAdapter = bluetoothManager.getAdapter();
-        if (bluetoothAdapter == null) {
-            // Device doesn't support Bluetooth
-        }
+        if (bluetoothAdapter == null)
+            Toast.makeText(this.requireContext(), "Device does not have Bluetooth, unable to connect.", Toast.LENGTH_LONG).show();
         if (!bluetoothAdapter.isEnabled()) {
             Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
             startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
-        } else {
+        } else
             selectBluetoothDevice();
-        }
     }
 
     final int REQUEST_CONNECT_BT = 1;
