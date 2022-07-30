@@ -10,12 +10,30 @@
         android:id="@+id/hc"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        app:layout_constraintBottom_toTopOf="@id/hc2"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <com.highsoft.highcharts.core.HIChartView
+        android:id="@+id/hc2"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
         app:layout_constraintBottom_toTopOf="@id/button_first"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" >
+        app:layout_constraintTop_toBottomOf="@id/hc" />
 
-    </com.highsoft.highcharts.core.HIChartView>
+    <TextView
+        android:id="@+id/text_gear_ratio"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:layout_constraintRight_toRightOf="parent"
+        app:layout_constraintBottom_toBottomOf="@id/button_first"
+        app:layout_constraintTop_toTopOf="@id/button_first"
+        app:layout_constraintLeft_toRightOf="@id/button_first"
+        android:text="Gear ratio: "
+        />
 
     <Button
         android:id="@+id/button_first"
@@ -25,5 +43,5 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/hc" />
+        app:layout_constraintTop_toBottomOf="@+id/hc2" />
 </androidx.constraintlayout.widget.ConstraintLayout>
