@@ -27,6 +27,8 @@ import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
 import androidx.fragment.app.Fragment;
 //import androidx.navigation.fragment.NavHostFragment;
+//                NavHostFragment.findNavController(FirstFragment.this)
+//                        .navigate(R.id.action_FirstFragment_to_SecondFragment);
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -37,9 +39,12 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import com.github.pires.obd.commands.ObdCommand;
 import com.github.pires.obd.commands.SpeedCommand;
+import com.github.pires.obd.commands.control.ModuleVoltageCommand;
 import com.github.pires.obd.commands.protocol.EchoOffCommand;
 import com.github.pires.obd.commands.protocol.HeadersOffCommand;
 import com.github.pires.obd.commands.protocol.LineFeedOffCommand;
@@ -50,7 +55,6 @@ import com.highsoft.highcharts.common.HIColor;
 import com.highsoft.highcharts.common.HIGradient;
 import com.highsoft.highcharts.common.HIStop;
 import com.highsoft.highcharts.common.hichartsclasses.HIBackground;
-import com.highsoft.highcharts.common.hichartsclasses.HIPoint;
 import com.highsoft.highcharts.common.hichartsclasses.HISeries;
 import com.highsoft.highcharts.common.hichartsclasses.HIXAxis;
 import com.highsoft.highcharts.core.HIChartView;
@@ -70,18 +74,20 @@ import nl.xaho.javaobd.HiChartsBuilders.HiTitle;
 import nl.xaho.javaobd.HiChartsBuilders.HiTooltip;
 import nl.xaho.javaobd.HiChartsBuilders.HiXAxis;
 import nl.xaho.javaobd.HiChartsBuilders.HiYAxis;
-import nl.xaho.javaobd.OBDCommands.InstantCommand;
 import nl.xaho.javaobd.OBDCommands.InstantRPMCommand;
 import nl.xaho.javaobd.databinding.FragmentFirstBinding;
 
 public class FirstFragment extends Fragment implements ActivityCompat.OnRequestPermissionsResultCallback {
     public static final String TAG = "obd";
+    ExecutorService executorService = Executors.newFixedThreadPool(4);
     private FragmentFirstBinding binding;
     private String deviceAddress;
     private Runnable pollOdbRunnable;
     private final Handler handler = new Handler();
     private InputStream in;
     private OutputStream out;
+    HIChartView chartView;
+    HIChartView chartView2;
 
     @Override
     public View onCreateView(
@@ -97,7 +103,7 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
     public void onViewCreated(@NonNull View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        HIChartView chartView = view.findViewById(R.id.hc);
+        chartView = view.findViewById(R.id.hc);
         chartView.plugins = new ArrayList<>(Arrays.asList("series-label"));
 
         // https://api.highcharts.com/class-reference/Highcharts.Time#dateFormat
@@ -107,16 +113,18 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
                         .setXAxis(new ArrayList<>(Arrays.asList(createDatetimeAxis())))
                         .setYAxis(new ArrayList<>(Arrays.asList(
                                 new HiYAxis().setTitle("Voltage").setMin(0).build(),
-                                new HiYAxis().setTitle("RPM").setMin(0).setOpposite(true).build()
+                                new HiYAxis().setTitle("RPM").setMin(0).setOpposite(true).build(),
+                                new HiYAxis().setTitle("KMh").setMin(0).setOpposite(true).build()
                         )))
                         .setPlotOptions(
                                 new HiPlotOptions().setSpline(
                                         new HiSpline().setMarker(
-                                                new HiMarker().setEnabled(true).setRadius(2).build()).build()).build())
+                                                new HiMarker().setEnabled(true).setRadius(0).build()).build()).build())
                         .setTooltip(new HiTooltip().setHeaderFormat("<b>{series.name}</b><br>").setPointFormat("{point.x:%H:%M:%S.%L}: {point.y:.2f}").build())
                         .setSeries(new ArrayList<>(Arrays.asList(
-//                                new HiSpline().setName("Module voltage").build(),
-                                new HiSpline().setName("Engine RPM").setYAxis(1).build()
+                                new HiSpline().setName("Module voltage").build(),
+                                new HiSpline().setName("Engine RPM").setYAxis(1).build(),
+                                new HiSpline().setName("Speed").setYAxis(2).build()
                         ))).build());
 
         HIGradient gradient = new HIGradient();
@@ -125,7 +133,7 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
                 new HIStop(1, HIColor.initWithHexValue("333"))
         ));
 
-        HIChartView chartView2 = view.findViewById(R.id.hc2);
+        chartView2 = view.findViewById(R.id.hc2);
         chartView2.setOptions(new HiOptions()
                 .setChart(new HiChart().setType("gauge").setPlotBorderWidth(0).build())
                 .setTitle("Speedometer")
@@ -178,11 +186,22 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
         binding.buttonFirst.setOnLongClickListener(x -> emulateConnection());
     }
 
+    private HISeries getSeriesWithName(HIChartView chartview, String name) {
+        ArrayList<HISeries> series = chartview.getOptions().getSeries();
+        for (HISeries s : series) {
+            if (s.getName().equals(name)) {
+                return s;
+            }
+        }
+        return null;
+    }
+
     private boolean emulateConnection() {
         handler.postDelayed(pollOdbRunnable = () -> {
-            getSeriesWithName("Speed").setData(new ArrayList(Arrays.asList(new HiData().setX(System.currentTimeMillis()).setY(Math.random() * 100).build())));
-            getSeriesWithName("Module voltage").addPoint(new HiData().setX(System.currentTimeMillis()).setY(Math.random()*100).build());
-            getSeriesWithName("Engine RPM").addPoint(new HiData().setX(System.currentTimeMillis()).setY(Math.random()*100).build());
+//            getSeriesWithName(chartView2, "Speed").setData(new ArrayList(Arrays.asList(new HiData().setX(System.currentTimeMillis()).setY(Math.random() * 100).build())));
+            getSeriesWithName(chartView, "Module voltage").addPoint(new HiData().setX(System.currentTimeMillis()).setY(Math.random() * 100).build());
+            getSeriesWithName(chartView, "Engine RPM").addPoint(new HiData().setX(System.currentTimeMillis()).setY((int) (Math.random() * 100)).build());
+            getSeriesWithName(chartView, "Speed").addPoint(new HiData().setX(System.currentTimeMillis()).setY((int) (Math.random() * 100)).build());
             handler.postDelayed(pollOdbRunnable, 1000);
         }, 1000);
         return true; //consume event
@@ -262,16 +281,7 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
 
                     int position = ((AlertDialog) dialog).getListView().getCheckedItemPosition();
                     deviceAddress = devices.get(position);
-                    BluetoothAdapter btAdapter1 = BluetoothAdapter.getDefaultAdapter();
-                    BluetoothDevice device = btAdapter1.getRemoteDevice(deviceAddress);
-
-                    try {
-                        if (!setupBluetoothConnection(device)) return;
-                        setupOB2Configuration(in, out);
-                        setupPolling(in, out);
-                    } catch (IOException | InterruptedException e) {
-                        e.printStackTrace();
-                    }
+                    connectToBtDeviceAddress();
                 })
                 .setTitle("Choose Bluetooth device")
                 .show();
@@ -311,6 +321,19 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
         return true;
     }
 
+    private void connectToBtDeviceAddress() {
+        BluetoothAdapter btAdapter1 = BluetoothAdapter.getDefaultAdapter();
+        BluetoothDevice device = btAdapter1.getRemoteDevice(deviceAddress);
+
+        try {
+            if (!setupBluetoothConnection(device)) return;
+            setupOB2Configuration(in, out);
+            setupPolling(in, out);
+        } catch (IOException | InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
     private void setupOB2Configuration(InputStream in, OutputStream out) throws IOException, InterruptedException {
         new EchoOffCommand().run(in, out);
         new HeadersOffCommand().run(in, out);
@@ -320,30 +343,27 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
         new SelectProtocolCommand(ObdProtocols.AUTO).run(in, out);
     }
 
+    interface PollCallback {
+        void onResult(ArrayList<Number> values);
+    }
+
     private void setupPolling(InputStream in, OutputStream out) {
-        handler.postDelayed(pollOdbRunnable = () -> {
-            poll(in, out);
-            handler.postDelayed(pollOdbRunnable, 0);
-        }, 0);
+        // list of commands to execute
+        PollCallback cb = values -> {
+            Number voltage = values.get(0);
+            Number rpm = values.get(1);
+            Number speed = values.get(2);
+            getSeriesWithName(chartView, "Module voltage").addPoint(new HiData().setX(System.currentTimeMillis()).setY(voltage).build());
+            getSeriesWithName(chartView, "Engine RPM").addPoint(new HiData().setX(System.currentTimeMillis()).setY(rpm).build());
+            getSeriesWithName(chartView, "Speed").addPoint(new HiData().setX(System.currentTimeMillis()).setY(speed).build());
+        };
+        executorService.execute(() -> handler.postDelayed(pollOdbRunnable = () -> {
+            poll(in, out, cb);
+            handler.postDelayed(pollOdbRunnable, 500);
+        }, 0));
     }
 
-    private HISeries getSeriesWithName(String name) {
-        ArrayList<HISeries> series = ((HIChartView) this.getView().findViewById(R.id.hc)).getOptions().getSeries();
-        for (HISeries s : series) {
-            if (s.getName().equals(name)) {
-                return s;
-            }
-        }
-        series = ((HIChartView) this.getView().findViewById(R.id.hc2)).getOptions().getSeries();
-        for (HISeries s : series) {
-            if (s.getName().equals(name)) {
-                return s;
-            }
-        }
-        return null;
-    }
-
-    private void poll(InputStream in, OutputStream out) {
+    private void poll(InputStream in, OutputStream out, PollCallback cb) {
         // TODO: Packed data?
         // TODO: Multiple PID requests? https://stackoverflow.com/questions/21334147/send-multiple-obd-commands-together-and-get-response-simultaneously
         // TODO: instant response on first data: https://stackoverflow.com/questions/21334147/send-multiple-obd-commands-together-and-get-response-simultaneously
@@ -351,27 +371,31 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
         try {
             final long start = System.currentTimeMillis();
             // TODO: Unable to connect causes broken pipe
+            ModuleVoltageCommand mvc = new ModuleVoltageCommand();
+            mvc.run(in, out);
+            double voltage = mvc.getVoltage();
 
             InstantRPMCommand instantRPMCommand = new InstantRPMCommand();
             instantRPMCommand.run(in, out);
             LogCommandDuration(instantRPMCommand);
-            getSeriesWithName("Engine RPM").addPoint(new HiData().setX(System.currentTimeMillis()).setY(instantRPMCommand.getRPM()).build());
+            int rpm = instantRPMCommand.getRPM();
 
             SpeedCommand speedCommand = new SpeedCommand();
             speedCommand.run(in, out);
             LogCommandDuration(speedCommand);
-            getSeriesWithName("Speed").setData(new ArrayList(Arrays.asList(new HiData().setX(System.currentTimeMillis()).setY(speedCommand.getMetricSpeed()).build())));
-
-            Log.d(TAG, "Total time for loop: " + String.valueOf(System.currentTimeMillis()-start));
+            int speed = speedCommand.getMetricSpeed();
+            Log.d(TAG, String.format("%02f, %d, %d", voltage, rpm, speed));
+            Log.d(TAG, "Total time for loop: " + String.valueOf(System.currentTimeMillis() - start));
+            cb.onResult(new ArrayList(Arrays.asList(voltage, rpm, speed)));
 //        } catch (UnableToConnectException e) {
 //            Toast.makeText(this.requireContext(), "Failed to connect to OBD2 scanner", Toast.LENGTH_SHORT).show();
-        } catch (IOException | InterruptedException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
     private void LogCommandDuration(ObdCommand c) {
-        Log.d(TAG, c.getName() + " took " + (c.getEnd()-c.getStart()) + " ms");
+        Log.d(TAG, c.getName() + " took " + (c.getEnd() - c.getStart()) + " ms");
     }
 
     @Override
@@ -379,5 +403,4 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
         super.onDestroyView();
         binding = null;
     }
-
 }
