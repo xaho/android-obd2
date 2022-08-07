@@ -1,25 +1,28 @@
 package nl.xaho.javaobd;
 
 import static android.app.Activity.RESULT_OK;
-import static androidx.core.content.ContextCompat.getSystemService;
 
-import android.Manifest;
+import static nl.xaho.javaobd.HiChartsBuilders.HiUtils.createDatetimeAxis;
+import static nl.xaho.javaobd.HiChartsBuilders.HiUtils.getSeriesWithName;
+
 import android.app.AlertDialog;
-import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothManager;
-import android.bluetooth.BluetoothSocket;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
+import android.content.ServiceConnection;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.IBinder;
 import android.util.Log;
+import android.util.Pair;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 //import android.webkit.WebView;
 import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -37,14 +40,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
-import java.util.Set;
-import java.util.UUID;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import com.github.pires.obd.commands.ObdCommand;
-import com.github.pires.obd.commands.SpeedCommand;
-import com.github.pires.obd.commands.control.ModuleVoltageCommand;
+import com.github.pires.obd.commands.protocol.DescribeProtocolCommand;
 import com.github.pires.obd.commands.protocol.EchoOffCommand;
 import com.github.pires.obd.commands.protocol.HeadersOffCommand;
 import com.github.pires.obd.commands.protocol.LineFeedOffCommand;
@@ -55,8 +56,6 @@ import com.highsoft.highcharts.common.HIColor;
 import com.highsoft.highcharts.common.HIGradient;
 import com.highsoft.highcharts.common.HIStop;
 import com.highsoft.highcharts.common.hichartsclasses.HIBackground;
-import com.highsoft.highcharts.common.hichartsclasses.HISeries;
-import com.highsoft.highcharts.common.hichartsclasses.HIXAxis;
 import com.highsoft.highcharts.core.HIChartView;
 
 import nl.xaho.javaobd.HiChartsBuilders.HiBackground;
@@ -72,9 +71,10 @@ import nl.xaho.javaobd.HiChartsBuilders.HiPlotOptions;
 import nl.xaho.javaobd.HiChartsBuilders.HiSpline;
 import nl.xaho.javaobd.HiChartsBuilders.HiTitle;
 import nl.xaho.javaobd.HiChartsBuilders.HiTooltip;
-import nl.xaho.javaobd.HiChartsBuilders.HiXAxis;
 import nl.xaho.javaobd.HiChartsBuilders.HiYAxis;
 import nl.xaho.javaobd.OBDCommands.InstantRPMCommand;
+import nl.xaho.javaobd.OBDCommands.InstantSpeedCommand;
+import nl.xaho.javaobd.OBDCommands.InstantThrottlePositionCommand;
 import nl.xaho.javaobd.databinding.FragmentFirstBinding;
 
 public class FirstFragment extends Fragment implements ActivityCompat.OnRequestPermissionsResultCallback {
@@ -84,10 +84,12 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
     private String deviceAddress;
     private Runnable pollOdbRunnable;
     private final Handler handler = new Handler();
-    private InputStream in;
-    private OutputStream out;
     HIChartView chartView;
     HIChartView chartView2;
+    TextView tv;
+    Button btn;
+    BluetoothService btService;
+    boolean mBound = false;
 
     @Override
     public View onCreateView(
@@ -96,25 +98,83 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
     ) {
 //        WebView.setWebContentsDebuggingEnabled(true);
         binding = FragmentFirstBinding.inflate(inflater, container, false);
+        setupHighcharts(binding.getRoot());
         return binding.getRoot();
     }
 
     @RequiresApi(api = Build.VERSION_CODES.S)
     public void onViewCreated(@NonNull View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+        tv = view.findViewById(R.id.text_gear_ratio);
+        btn = view.findViewById(R.id.button_first);
 
+        binding.buttonFirst.setOnClickListener(x -> showDialogForBtDevice());
+        binding.buttonFirst.setOnLongClickListener(x -> emulateConnection());
+        Context context = this.requireContext();
+        Intent intent = new Intent(context, BluetoothService.class);
+        context.startForegroundService(intent);
+        context.bindService(intent, connection, Context.BIND_AUTO_CREATE);
+    }
+
+    private final ServiceConnection connection = new ServiceConnection() {
+        @RequiresApi(api = Build.VERSION_CODES.S)
+        @Override
+        public void onServiceConnected(ComponentName className, IBinder service) {
+            // We've bound to BluetoothService, cast the IBinder and get BluetoothService instance
+            BluetoothService.BluetoothBinder binder = (BluetoothService.BluetoothBinder) service;
+            btService = binder.getService();
+            mBound = true;
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName arg0) {
+            mBound = false;
+        }
+    };
+
+    @RequiresApi(api = Build.VERSION_CODES.S)
+    private void showDialogForBtDevice() {
+        try {
+            Pair<List<String>, List<String>> btDevices = btService.GetBluetoothDevices(FirstFragment.this.requireActivity());
+            // show dialog to select device
+            final AlertDialog.Builder alertDialog = new AlertDialog.Builder(this.requireContext());
+            List<String> deviceStrs = btDevices.first;
+            final List<String> devices = btDevices.second;
+            ArrayAdapter adapter = new ArrayAdapter(this.requireContext(), android.R.layout.select_dialog_singlechoice,
+                    deviceStrs.toArray(new String[deviceStrs.size()]));
+
+            alertDialog
+                    .setSingleChoiceItems(adapter, -1, (dialog, which) -> {
+                        dialog.dismiss();
+                        deviceAddress = devices.get(((AlertDialog) dialog).getListView().getCheckedItemPosition());
+                        try {
+                            connectToBtDeviceAddress(deviceAddress);
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                            Toast.makeText(this.requireContext(), "Failed to connect", Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setTitle("Choose Bluetooth device")
+                    .show();
+        } catch (Exception e) {
+        }
+    }
+
+    private void setupHighcharts(@NonNull View view) {
         chartView = view.findViewById(R.id.hc);
         chartView.plugins = new ArrayList<>(Arrays.asList("series-label"));
 
         // https://api.highcharts.com/class-reference/Highcharts.Time#dateFormat
         chartView.setOptions(
                 new HiOptions()
+                        .setChart(new HiChart().setZoomType("x").build())
                         .setTitle(new HiTitle().setText("OBD2 data").build())
                         .setXAxis(new ArrayList<>(Arrays.asList(createDatetimeAxis())))
                         .setYAxis(new ArrayList<>(Arrays.asList(
-                                new HiYAxis().setTitle("Voltage").setMin(0).build(),
-                                new HiYAxis().setTitle("RPM").setMin(0).setOpposite(true).build(),
-                                new HiYAxis().setTitle("KMh").setMin(0).setOpposite(true).build()
+//                                new HiYAxis().setTitle("Voltage").setMin(0).build(),
+                                new HiYAxis().setTitle("RPM").setMin(0).build(),
+                                new HiYAxis().setTitle("KMh").setMin(0).setOpposite(true).build(),
+                                new HiYAxis().setTitle("%").setMin(0).setMax(100).setOpposite(true).build()
                         )))
                         .setPlotOptions(
                                 new HiPlotOptions().setSpline(
@@ -122,9 +182,10 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
                                                 new HiMarker().setEnabled(true).setRadius(0).build()).build()).build())
                         .setTooltip(new HiTooltip().setHeaderFormat("<b>{series.name}</b><br>").setPointFormat("{point.x:%H:%M:%S.%L}: {point.y:.2f}").build())
                         .setSeries(new ArrayList<>(Arrays.asList(
-                                new HiSpline().setName("Module voltage").build(),
-                                new HiSpline().setName("Engine RPM").setYAxis(1).build(),
-                                new HiSpline().setName("Speed").setYAxis(2).build()
+//                                new HiSpline().setName("Module voltage").build(),
+                                new HiSpline().setName("Engine RPM").setYAxis(0).build(),
+                                new HiSpline().setName("Speed").setYAxis(1).build(),
+                                new HiSpline().setName("Throttle").setYAxis(2).build()
                         ))).build());
 
         HIGradient gradient = new HIGradient();
@@ -181,38 +242,22 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
                                 .setData(new ArrayList<>(Collections.singletonList(0)))
                                 .build())))
                 .build());
-
-        binding.buttonFirst.setOnClickListener(x -> checkBluetooth());
-        binding.buttonFirst.setOnLongClickListener(x -> emulateConnection());
     }
 
-    private HISeries getSeriesWithName(HIChartView chartview, String name) {
-        ArrayList<HISeries> series = chartview.getOptions().getSeries();
-        for (HISeries s : series) {
-            if (s.getName().equals(name)) {
-                return s;
-            }
-        }
-        return null;
-    }
-
+    @RequiresApi(api = Build.VERSION_CODES.Q)
     private boolean emulateConnection() {
+        if (handler.hasCallbacks(pollOdbRunnable)) {
+            handler.removeCallbacks(pollOdbRunnable);
+            return true;
+        }
         handler.postDelayed(pollOdbRunnable = () -> {
 //            getSeriesWithName(chartView2, "Speed").setData(new ArrayList(Arrays.asList(new HiData().setX(System.currentTimeMillis()).setY(Math.random() * 100).build())));
-            getSeriesWithName(chartView, "Module voltage").addPoint(new HiData().setX(System.currentTimeMillis()).setY(Math.random() * 100).build());
+//            getSeriesWithName(chartView, "Module voltage").addPoint(new HiData().setX(System.currentTimeMillis()).setY(Math.random() * 100).build());
             getSeriesWithName(chartView, "Engine RPM").addPoint(new HiData().setX(System.currentTimeMillis()).setY((int) (Math.random() * 100)).build());
             getSeriesWithName(chartView, "Speed").addPoint(new HiData().setX(System.currentTimeMillis()).setY((int) (Math.random() * 100)).build());
-            handler.postDelayed(pollOdbRunnable, 1000);
+            handler.postDelayed(pollOdbRunnable, 350);
         }, 1000);
         return true; //consume event
-    }
-
-    @NonNull
-    private HIXAxis createDatetimeAxis() {
-        return new HiXAxis()
-                .setTitle("Date")
-                .setType("datetime")
-                .build();
     }
 
     final int REQUEST_ENABLE_BT = 0;
@@ -220,118 +265,20 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
     public void onActivityResult(int requestCode, int resultCode, Intent intent) {
         if (requestCode == REQUEST_ENABLE_BT) {
             if (resultCode == RESULT_OK)
-                selectBluetoothDevice();
+                showDialogForBtDevice();
             else
                 Toast.makeText(this.requireContext(), "Cannot connect if Bluetooth is not enabled.", Toast.LENGTH_LONG).show();
         }
     }
 
-    @RequiresApi(api = Build.VERSION_CODES.S)
-    private void checkBluetooth() {
-        // TODO: turn BT on if off
-        BluetoothManager bluetoothManager = getSystemService(this.requireContext(), BluetoothManager.class);
-        BluetoothAdapter bluetoothAdapter = bluetoothManager.getAdapter();
-        if (bluetoothAdapter == null)
-            Toast.makeText(this.requireContext(), "Device does not have Bluetooth, unable to connect.", Toast.LENGTH_LONG).show();
-        if (!bluetoothAdapter.isEnabled()) {
-            Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-            startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
-        } else
-            selectBluetoothDevice();
-    }
+    private void connectToBtDeviceAddress(String deviceAddress) throws Exception {
+        Pair<InputStream, OutputStream> streams = btService.connectToBtDeviceAddress(deviceAddress);
+        InputStream in = streams.first;
+        OutputStream out = streams.second;
 
-    final int REQUEST_CONNECT_BT = 1;
-    @RequiresApi(api = Build.VERSION_CODES.S)
-    public void selectBluetoothDevice() {
-        // Check permissions
-        Log.println(Log.DEBUG, TAG, "dobtstuff");
-        BluetoothAdapter btAdapter = BluetoothAdapter.getDefaultAdapter();
-        if (ActivityCompat.checkSelfPermission(this.requireContext(), Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this.requireActivity(), new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQUEST_CONNECT_BT);
-            // TODO: Consider calling
-            //    ActivityCompat#requestPermissions
-            // here to request the missing permissions, and then overriding
-            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-            //                                          int[] grantResults)
-            // to handle the case where the user grants the permission. See the documentation
-            // for ActivityCompat#requestPermissions for more details.
-            return;
-        }
-        // get bluetooth devices
-        ArrayList<String> deviceStrs = new ArrayList<>();
-        final ArrayList<String> devices = new ArrayList<>();
-        Set<BluetoothDevice> pairedDevices = btAdapter.getBondedDevices();
-        if (pairedDevices.size() > 0) {
-            for (BluetoothDevice device : pairedDevices) {
-                deviceStrs.add(device.getName() + "\n" + device.getAddress());
-                devices.add(device.getAddress());
-            }
-        }
-
-        // show dialog to select device
-        final AlertDialog.Builder alertDialog = new AlertDialog.Builder(this.requireContext());
-
-        ArrayAdapter adapter = new ArrayAdapter(this.requireContext(), android.R.layout.select_dialog_singlechoice,
-                deviceStrs.toArray(new String[deviceStrs.size()]));
-
-        alertDialog
-                .setSingleChoiceItems(adapter, -1, (dialog, which) -> {
-                    // handle selection -> connect to device
-                    dialog.dismiss();
-
-                    int position = ((AlertDialog) dialog).getListView().getCheckedItemPosition();
-                    deviceAddress = devices.get(position);
-                    connectToBtDeviceAddress();
-                })
-                .setTitle("Choose Bluetooth device")
-                .show();
-    }
-
-    private boolean setupBluetoothConnection(BluetoothDevice device) throws IOException {
-        // TODO: Spinner
-        UUID uuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
-
-        if (ActivityCompat.checkSelfPermission(this.requireContext(), Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            Log.d(TAG, "should never happen");
-            return false;
-        }
-        // set up bluetooth serial connection
-        BluetoothSocket socket = null;
-        try {
-            socket = device.createInsecureRfcommSocketToServiceRecord(uuid);
-        } catch (IOException e) {
-            Log.d(TAG, "Failed to create RfCommSocket");
-            throw e;
-        }
-        try {
-            assert socket != null;
-            socket.connect();
-        } catch (IOException e) {
-            Log.d(TAG, "Failed to connect");
-            // TODO: Show toast
-            throw e;
-        }
-        try {
-            in = socket.getInputStream();
-            out = socket.getOutputStream();
-        } catch (IOException e) {
-            Log.d(TAG, "Failed to get IO stream");
-            throw e;
-        }
-        return true;
-    }
-
-    private void connectToBtDeviceAddress() {
-        BluetoothAdapter btAdapter1 = BluetoothAdapter.getDefaultAdapter();
-        BluetoothDevice device = btAdapter1.getRemoteDevice(deviceAddress);
-
-        try {
-            if (!setupBluetoothConnection(device)) return;
-            setupOB2Configuration(in, out);
-            setupPolling(in, out);
-        } catch (IOException | InterruptedException e) {
-            e.printStackTrace();
-        }
+        btn.setText("Disconnect");
+        setupOB2Configuration(in, out);
+        setupPolling(in, out);
     }
 
     private void setupOB2Configuration(InputStream in, OutputStream out) throws IOException, InterruptedException {
@@ -339,7 +286,9 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
         new HeadersOffCommand().run(in, out);
         new LineFeedOffCommand().run(in, out);
         new TimeoutCommand(100).run(in, out);
-        // TODO do not use auto
+        DescribeProtocolCommand dpc = new DescribeProtocolCommand();
+        dpc.run(in, out);
+        Log.d(TAG, "Describe Protocol (6,7,8,9 or ISO_15765_4... can handle multiple reqeusts): " + dpc.getFormattedResult());
         new SelectProtocolCommand(ObdProtocols.AUTO).run(in, out);
     }
 
@@ -350,45 +299,64 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
     private void setupPolling(InputStream in, OutputStream out) {
         // list of commands to execute
         PollCallback cb = values -> {
-            Number voltage = values.get(0);
+//            Number voltage = values.get(0);
             Number rpm = values.get(1);
             Number speed = values.get(2);
-            getSeriesWithName(chartView, "Module voltage").addPoint(new HiData().setX(System.currentTimeMillis()).setY(voltage).build());
+            Number throttle = values.get(3);
+//            getSeriesWithName(chartView, "Module voltage").addPoint(new HiData().setX(System.currentTimeMillis()).setY(voltage).build());
             getSeriesWithName(chartView, "Engine RPM").addPoint(new HiData().setX(System.currentTimeMillis()).setY(rpm).build());
             getSeriesWithName(chartView, "Speed").addPoint(new HiData().setX(System.currentTimeMillis()).setY(speed).build());
+            getSeriesWithName(chartView2, "Speed").setData(new ArrayList(Arrays.asList(new HiData().setX(System.currentTimeMillis()).setY(speed).build())));
+            getSeriesWithName(chartView, "Throttle").addPoint(new HiData().setX(System.currentTimeMillis()).setY(throttle).build());
         };
         executorService.execute(() -> handler.postDelayed(pollOdbRunnable = () -> {
             poll(in, out, cb);
-            handler.postDelayed(pollOdbRunnable, 500);
+            handler.postDelayed(pollOdbRunnable, 300);
         }, 0));
     }
 
     private void poll(InputStream in, OutputStream out, PollCallback cb) {
         // TODO: Packed data?
         // TODO: Multiple PID requests? https://stackoverflow.com/questions/21334147/send-multiple-obd-commands-together-and-get-response-simultaneously
-        // TODO: instant response on first data: https://stackoverflow.com/questions/21334147/send-multiple-obd-commands-together-and-get-response-simultaneously
         // TODO: resend last command using \r
         try {
             final long start = System.currentTimeMillis();
             // TODO: Unable to connect causes broken pipe
-            ModuleVoltageCommand mvc = new ModuleVoltageCommand();
-            mvc.run(in, out);
-            double voltage = mvc.getVoltage();
+//            ModuleVoltageCommand mvc = new ModuleVoltageCommand();
+//            mvc.run(in, out);
+//            LogCommandDuration(mvc);
+//            double voltage = mvc.getVoltage();
 
             InstantRPMCommand instantRPMCommand = new InstantRPMCommand();
             instantRPMCommand.run(in, out);
             LogCommandDuration(instantRPMCommand);
             int rpm = instantRPMCommand.getRPM();
 
-            SpeedCommand speedCommand = new SpeedCommand();
+            InstantSpeedCommand speedCommand = new InstantSpeedCommand();
             speedCommand.run(in, out);
             LogCommandDuration(speedCommand);
             int speed = speedCommand.getMetricSpeed();
-            Log.d(TAG, String.format("%02f, %d, %d", voltage, rpm, speed));
-            Log.d(TAG, "Total time for loop: " + String.valueOf(System.currentTimeMillis() - start));
-            cb.onResult(new ArrayList(Arrays.asList(voltage, rpm, speed)));
-//        } catch (UnableToConnectException e) {
-//            Toast.makeText(this.requireContext(), "Failed to connect to OBD2 scanner", Toast.LENGTH_SHORT).show();
+
+            InstantThrottlePositionCommand throttlePositionCommand = new InstantThrottlePositionCommand();
+            throttlePositionCommand.run(in, out);
+            LogCommandDuration(throttlePositionCommand);
+            float throttle = throttlePositionCommand.getPercentage();
+
+//            IntakeManifoldPressureCommand impc = new IntakeManifoldPressureCommand();
+//            impc.run(in, out);
+//            LogCommandDuration(impc);
+//            int kpa = impc.getMetricUnit();
+//            Log.d(TAG, "Intake manifold pressure: " + impc.getFormattedResult());
+
+//            InstantLoadCommand lc = new InstantLoadCommand();
+//            lc.run(in, out);
+//            LogCommandDuration(lc);
+//            float load = lc.getPercentage();
+//            Log.d(TAG, "Load: " + load);
+
+            Log.d(TAG, String.format("%02f, %d, %d", throttle, rpm, speed));
+            Log.d(TAG, "Total time for loop: " + (System.currentTimeMillis() - start));
+            cb.onResult(new ArrayList(Arrays.asList(throttle, rpm, speed, throttle)));
         } catch (Exception e) {
             e.printStackTrace();
         }

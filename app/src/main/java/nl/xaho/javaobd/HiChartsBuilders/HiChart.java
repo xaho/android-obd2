@@ -13,4 +13,9 @@ public class HiChart extends HighChartsBuilder<HIChart> {
         object.setPlotBorderWidth(width);
         return this;
     }
+
+    public HiChart setZoomType(String zoomType) {
+        object.setZoomType(zoomType);
+        return this;
+    }
 }
