@@ -1,0 +1,3 @@
+[submodule "obd-java-api"]
+	path = obd-java-api
+	url = git@github.com:xaho/obd-java-api.git

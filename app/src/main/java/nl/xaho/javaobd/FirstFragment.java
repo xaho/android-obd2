@@ -45,6 +45,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import com.github.pires.obd.commands.ObdCommand;
+import com.github.pires.obd.commands.SpeedCommand;
+import com.github.pires.obd.commands.control.VinCommand;
+import com.github.pires.obd.commands.engine.RPMCommand;
+import com.github.pires.obd.commands.engine.ThrottlePositionCommand;
 import com.github.pires.obd.commands.protocol.DescribeProtocolCommand;
 import com.github.pires.obd.commands.protocol.EchoOffCommand;
 import com.github.pires.obd.commands.protocol.HeadersOffCommand;
@@ -72,9 +76,6 @@ import nl.xaho.javaobd.HiChartsBuilders.HiSpline;
 import nl.xaho.javaobd.HiChartsBuilders.HiTitle;
 import nl.xaho.javaobd.HiChartsBuilders.HiTooltip;
 import nl.xaho.javaobd.HiChartsBuilders.HiYAxis;
-import nl.xaho.javaobd.OBDCommands.InstantRPMCommand;
-import nl.xaho.javaobd.OBDCommands.InstantSpeedCommand;
-import nl.xaho.javaobd.OBDCommands.InstantThrottlePositionCommand;
 import nl.xaho.javaobd.databinding.FragmentFirstBinding;
 
 public class FirstFragment extends Fragment implements ActivityCompat.OnRequestPermissionsResultCallback {
@@ -327,17 +328,17 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
 //            LogCommandDuration(mvc);
 //            double voltage = mvc.getVoltage();
 
-            InstantRPMCommand instantRPMCommand = new InstantRPMCommand();
-            instantRPMCommand.run(in, out);
-            LogCommandDuration(instantRPMCommand);
-            int rpm = instantRPMCommand.getRPM();
+            RPMCommand rpmCommand = new RPMCommand().setInstant(true);
+            rpmCommand.run(in, out);
+            LogCommandDuration(rpmCommand);
+            int rpm = rpmCommand.getRPM();
 
-            InstantSpeedCommand speedCommand = new InstantSpeedCommand();
+            SpeedCommand speedCommand = new SpeedCommand().setInstant(true);
             speedCommand.run(in, out);
             LogCommandDuration(speedCommand);
             int speed = speedCommand.getMetricSpeed();
 
-            InstantThrottlePositionCommand throttlePositionCommand = new InstantThrottlePositionCommand();
+            ThrottlePositionCommand throttlePositionCommand = new ThrottlePositionCommand().setInstant(true);
             throttlePositionCommand.run(in, out);
             LogCommandDuration(throttlePositionCommand);
             float throttle = throttlePositionCommand.getPercentage();

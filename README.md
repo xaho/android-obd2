@@ -14,3 +14,7 @@ Instant OBD2 response & multiple requests:
 - https://stackoverflow.com/questions/21334147/send-multiple-obd-commands-together-and-get-response-simultaneously
 
 Filter out HighCharts messages in LogCat using: javaobd (?!E/HIChartView|E/HINative|I/HIChartView)
+
+Android Studio:
+- Mark obd-java-api/src/main as sources root
+- Hover over faulty error in source file and add to classpath
