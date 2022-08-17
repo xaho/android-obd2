@@ -1,5 +1,6 @@
 package nl.xaho.javaobd.HiChartsBuilders;
 
+import com.highsoft.highcharts.common.hichartsclasses.HIAnimationOptionsObject;
 import com.highsoft.highcharts.common.hichartsclasses.HIChart;
 
 public class HiChart extends HighChartsBuilder<HIChart> {
@@ -16,6 +17,11 @@ public class HiChart extends HighChartsBuilder<HIChart> {
 
     public HiChart setZoomType(String zoomType) {
         object.setZoomType(zoomType);
+        return this;
+    }
+
+    public HiChart setAnimation(HIAnimationOptionsObject options) {
+        object.setAnimation(options);
         return this;
     }
 }

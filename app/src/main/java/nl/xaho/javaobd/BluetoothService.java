@@ -15,7 +15,9 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Binder;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.util.Log;
 import android.util.Pair;
 import android.widget.Toast;
 
@@ -23,18 +25,27 @@ import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
+import com.github.pires.obd.commands.ObdCommand;
+
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class BluetoothService extends Service {
     final String TAG = "BluetoothService";
     public static final String CHANNEL_ID = "ForegroundServiceChannel";
     private final IBinder binder = new BluetoothBinder();
+    private final ExecutorService executorService = Executors.newFixedThreadPool(4);
+    private final Handler handler = new Handler();
+    private Runnable pollOdbRunnable;
     private BluetoothSocket socket;
     private InputStream in;
     private OutputStream out;
@@ -127,6 +138,36 @@ public class BluetoothService extends Service {
         in = socket.getInputStream();
         out = socket.getOutputStream();
         return new Pair<>(in, out);
+    }
+
+    public void setupPolling(ArrayList<ObdCommand> commands) {
+        // TODO: While instead of executorservice?
+        executorService.execute(() -> handler.postDelayed(pollOdbRunnable = () -> {
+            try {
+                poll(in, out, commands);
+            } catch (IOException | InterruptedException e) {
+                e.printStackTrace();
+            }
+            handler.postDelayed(pollOdbRunnable, 0);
+        }, 0));
+    }
+
+    private void LogCommandDuration(ObdCommand c) {
+        Log.d(TAG, c.getName() + " took " + (c.getEnd() - c.getStart()) + " ms");
+    }
+
+    // TODO: Packed data?
+    // TODO: Multiple PID requests? https://stackoverflow.com/questions/21334147/send-multiple-obd-commands-together-and-get-response-simultaneously
+    // TODO: resend last command using \r
+    private void poll(InputStream in, OutputStream out, ArrayList<ObdCommand> commands) throws IOException, InterruptedException {
+        Intent intent = new Intent("pollingData");
+        for (ObdCommand command : commands) {
+            command.run(in, out);
+            LogCommandDuration(command);
+            intent.putExtra(command.getName(), command.getFormattedResult());
+            // how to execute lambda on command to get int, long, float or string
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
     }
 
     public class BluetoothBinder extends Binder {

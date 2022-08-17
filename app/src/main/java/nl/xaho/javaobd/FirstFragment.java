@@ -6,9 +6,11 @@ import static nl.xaho.javaobd.HiChartsBuilders.HiUtils.createDatetimeAxis;
 import static nl.xaho.javaobd.HiChartsBuilders.HiUtils.getSeriesWithName;
 
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.os.Build;
 import android.os.Bundle;
@@ -29,6 +31,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
 import androidx.fragment.app.Fragment;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 //import androidx.navigation.fragment.NavHostFragment;
 //                NavHostFragment.findNavController(FirstFragment.this)
 //                        .navigate(R.id.action_FirstFragment_to_SecondFragment);
@@ -46,7 +49,7 @@ import java.util.concurrent.Executors;
 
 import com.github.pires.obd.commands.ObdCommand;
 import com.github.pires.obd.commands.SpeedCommand;
-import com.github.pires.obd.commands.control.VinCommand;
+import com.github.pires.obd.commands.control.ModuleVoltageCommand;
 import com.github.pires.obd.commands.engine.RPMCommand;
 import com.github.pires.obd.commands.engine.ThrottlePositionCommand;
 import com.github.pires.obd.commands.protocol.DescribeProtocolCommand;
@@ -59,6 +62,7 @@ import com.github.pires.obd.enums.ObdProtocols;
 import com.highsoft.highcharts.common.HIColor;
 import com.highsoft.highcharts.common.HIGradient;
 import com.highsoft.highcharts.common.HIStop;
+import com.highsoft.highcharts.common.hichartsclasses.HIAnimationOptionsObject;
 import com.highsoft.highcharts.common.hichartsclasses.HIBackground;
 import com.highsoft.highcharts.core.HIChartView;
 
@@ -91,6 +95,11 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
     Button btn;
     BluetoothService btService;
     boolean mBound = false;
+    BroadcastReceiver receiver;
+    ArrayList<ObdCommand> commands = new ArrayList<>(Arrays.asList(
+            new SpeedCommand().setInstant(true),
+            new RPMCommand().setInstant(true)
+    ));
 
     @Override
     public View onCreateView(
@@ -115,6 +124,40 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
         Intent intent = new Intent(context, BluetoothService.class);
         context.startForegroundService(intent);
         context.bindService(intent, connection, Context.BIND_AUTO_CREATE);
+        receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                int speed;
+                int rpm;
+                float throttle;
+                double voltage;
+                for (ObdCommand command : commands) {
+                    // TODO: Validate this works
+                    if (command instanceof SpeedCommand) {
+                        speed = ((SpeedCommand) command).getMetricSpeed();
+                        getSeriesWithName(chartView, "Speed").addPoint(new HiData().setX(System.currentTimeMillis()).setY(speed).build());
+                        getSeriesWithName(chartView2, "Speed").setData(new ArrayList(Arrays.asList(new HiData().setX(System.currentTimeMillis()).setY(speed).build())));
+//                        Log.d(TAG, "Speed: "+ speed);
+                    } else if (command instanceof RPMCommand) {
+                        rpm = ((RPMCommand) command).getRPM();
+                        getSeriesWithName(chartView, "Engine RPM").addPoint(new HiData().setX(System.currentTimeMillis()).setY(rpm).build());
+//                        Log.d(TAG, "RPM: " + rpm);
+                    } else if (command instanceof ThrottlePositionCommand) {
+                        throttle = ((ThrottlePositionCommand) command).getPercentage();
+                        getSeriesWithName(chartView, "Throttle").addPoint(new HiData().setX(System.currentTimeMillis()).setY(throttle).build());
+                    } else if (command instanceof ModuleVoltageCommand) {
+                        voltage = ((ModuleVoltageCommand) command).getVoltage();
+//                        getSeriesWithName(chartView, "Module voltage").addPoint(new HiData().setX(System.currentTimeMillis()).setY(voltage).build());
+                    }
+                }
+            }
+        };
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        LocalBroadcastManager.getInstance(this.requireContext()).registerReceiver(receiver, new IntentFilter("pollingData"));
     }
 
     private final ServiceConnection connection = new ServiceConnection() {
@@ -166,9 +209,13 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
         chartView.plugins = new ArrayList<>(Arrays.asList("series-label"));
 
         // https://api.highcharts.com/class-reference/Highcharts.Time#dateFormat
+
+        HIAnimationOptionsObject animationOptions = new HIAnimationOptionsObject();
+        animationOptions.setDuration(0);
         chartView.setOptions(
                 new HiOptions()
-                        .setChart(new HiChart().setZoomType("x").build())
+                        .setChart(new HiChart().setZoomType("x").setAnimation(
+                                animationOptions).build())
                         .setTitle(new HiTitle().setText("OBD2 data").build())
                         .setXAxis(new ArrayList<>(Arrays.asList(createDatetimeAxis())))
                         .setYAxis(new ArrayList<>(Arrays.asList(
@@ -256,7 +303,7 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
 //            getSeriesWithName(chartView, "Module voltage").addPoint(new HiData().setX(System.currentTimeMillis()).setY(Math.random() * 100).build());
             getSeriesWithName(chartView, "Engine RPM").addPoint(new HiData().setX(System.currentTimeMillis()).setY((int) (Math.random() * 100)).build());
             getSeriesWithName(chartView, "Speed").addPoint(new HiData().setX(System.currentTimeMillis()).setY((int) (Math.random() * 100)).build());
-            handler.postDelayed(pollOdbRunnable, 350);
+            handler.postDelayed(pollOdbRunnable, 100);
         }, 1000);
         return true; //consume event
     }
@@ -279,7 +326,7 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
 
         btn.setText("Disconnect");
         setupOB2Configuration(in, out);
-        setupPolling(in, out);
+        setupPolling();
     }
 
     private void setupOB2Configuration(InputStream in, OutputStream out) throws IOException, InterruptedException {
@@ -293,78 +340,8 @@ public class FirstFragment extends Fragment implements ActivityCompat.OnRequestP
         new SelectProtocolCommand(ObdProtocols.AUTO).run(in, out);
     }
 
-    interface PollCallback {
-        void onResult(ArrayList<Number> values);
-    }
-
-    private void setupPolling(InputStream in, OutputStream out) {
-        // list of commands to execute
-        PollCallback cb = values -> {
-//            Number voltage = values.get(0);
-            Number rpm = values.get(1);
-            Number speed = values.get(2);
-            Number throttle = values.get(3);
-//            getSeriesWithName(chartView, "Module voltage").addPoint(new HiData().setX(System.currentTimeMillis()).setY(voltage).build());
-            getSeriesWithName(chartView, "Engine RPM").addPoint(new HiData().setX(System.currentTimeMillis()).setY(rpm).build());
-            getSeriesWithName(chartView, "Speed").addPoint(new HiData().setX(System.currentTimeMillis()).setY(speed).build());
-            getSeriesWithName(chartView2, "Speed").setData(new ArrayList(Arrays.asList(new HiData().setX(System.currentTimeMillis()).setY(speed).build())));
-            getSeriesWithName(chartView, "Throttle").addPoint(new HiData().setX(System.currentTimeMillis()).setY(throttle).build());
-        };
-        executorService.execute(() -> handler.postDelayed(pollOdbRunnable = () -> {
-            poll(in, out, cb);
-            handler.postDelayed(pollOdbRunnable, 300);
-        }, 0));
-    }
-
-    private void poll(InputStream in, OutputStream out, PollCallback cb) {
-        // TODO: Packed data?
-        // TODO: Multiple PID requests? https://stackoverflow.com/questions/21334147/send-multiple-obd-commands-together-and-get-response-simultaneously
-        // TODO: resend last command using \r
-        try {
-            final long start = System.currentTimeMillis();
-            // TODO: Unable to connect causes broken pipe
-//            ModuleVoltageCommand mvc = new ModuleVoltageCommand();
-//            mvc.run(in, out);
-//            LogCommandDuration(mvc);
-//            double voltage = mvc.getVoltage();
-
-            RPMCommand rpmCommand = new RPMCommand().setInstant(true);
-            rpmCommand.run(in, out);
-            LogCommandDuration(rpmCommand);
-            int rpm = rpmCommand.getRPM();
-
-            SpeedCommand speedCommand = new SpeedCommand().setInstant(true);
-            speedCommand.run(in, out);
-            LogCommandDuration(speedCommand);
-            int speed = speedCommand.getMetricSpeed();
-
-            ThrottlePositionCommand throttlePositionCommand = new ThrottlePositionCommand().setInstant(true);
-            throttlePositionCommand.run(in, out);
-            LogCommandDuration(throttlePositionCommand);
-            float throttle = throttlePositionCommand.getPercentage();
-
-//            IntakeManifoldPressureCommand impc = new IntakeManifoldPressureCommand();
-//            impc.run(in, out);
-//            LogCommandDuration(impc);
-//            int kpa = impc.getMetricUnit();
-//            Log.d(TAG, "Intake manifold pressure: " + impc.getFormattedResult());
-
-//            InstantLoadCommand lc = new InstantLoadCommand();
-//            lc.run(in, out);
-//            LogCommandDuration(lc);
-//            float load = lc.getPercentage();
-//            Log.d(TAG, "Load: " + load);
-
-            Log.d(TAG, String.format("%02f, %d, %d", throttle, rpm, speed));
-            Log.d(TAG, "Total time for loop: " + (System.currentTimeMillis() - start));
-            cb.onResult(new ArrayList(Arrays.asList(throttle, rpm, speed, throttle)));
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void LogCommandDuration(ObdCommand c) {
-        Log.d(TAG, c.getName() + " took " + (c.getEnd() - c.getStart()) + " ms");
+    private void setupPolling() {
+        btService.setupPolling(commands);
     }
 
     @Override
